@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>おバカな鳥は先に飛ぶ</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101827;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  body{display:grid;place-items:center}
+  .wrap{width:min(100vw,520px);height:min(100dvh,820px);position:relative;display:grid;place-items:center}
+  canvas{width:100%;height:100%;display:block;background:#8ed8e8;touch-action:manipulation}
+  .hud{position:absolute;inset:0;pointer-events:none;color:#fff;text-shadow:0 2px 4px #334b5c}
+  .top{position:absolute;top:18px;left:0;right:0;text-align:center;font-weight:900;font-size:clamp(28px,8vw,42px);letter-spacing:2px}
+  .score{position:absolute;top:76px;left:0;right:0;text-align:center;font-size:22px;font-weight:800}
+  .hint{position:absolute;bottom:25px;left:12px;right:12px;text-align:center;font-size:13px;opacity:.9}
+  .panel{position:absolute;inset:0;display:grid;place-items:center;background:#12233755;pointer-events:auto}
+  .card{width:min(84%,340px);padding:24px 22px;border:3px solid #fff;border-radius:22px;background:#fff1d7;color:#34404a;text-align:center;box-shadow:0 8px 0 #5a7a83}
+  .card h1{margin:0 0 8px;font-size:30px;color:#e17a35}
+  .card p{margin:8px 0 18px;line-height:1.6}
+  button{border:0;border-radius:999px;padding:12px 28px;background:#f28b3c;color:white;font-weight:900;font-size:18px;box-shadow:0 4px 0 #bd5c26;cursor:pointer}
+  button:active{transform:translateY(3px);box-shadow:0 1px 0 #bd5c26}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <canvas id="game" aria-label="笨鸟先飞游戏"></canvas>
+  <div class="hud">
+    <div class="top" data-i18n="gameTitle">おバカな鳥は先に飛ぶ</div>
+    <div class="score" id="score">0</div>
+    <div class="hint" data-i18n="hint">タップ / Space / ↑：羽ばたく　·　パイプを通過して得点</div>
+  </div>
+  <div class="panel" id="panel">
+    <div class="card">
+      <h1 id="panelTitle">🐤 おバカな鳥は先に飛ぶ</h1>
+      <p id="panelText">ちょっとドジな小鳥が、努力で大空を飛ぼうと決意した。<br>画面をタップして、羽ばたかせよう！</p>
+      <button id="start">飛び立とう！</button>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('game'), ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score'), panel = document.getElementById('panel');
+  const lang = /^zh(?:-|$)/i.test(navigator.language || '') ? 'zh' : 'ja';
+  const words = {
+    ja: {
+      gameTitle: 'おバカな鳥は先に飛ぶ',
+      hint: 'タップ / Space / ↑：羽ばたく　·　パイプを通過して得点',
+      welcomeTitle: '🐤 おバカな鳥は先に飛ぶ',
+      welcome: 'ちょっとドジな小鳥が、努力で大空を飛ぼうと決意した。<br>画面をタップして、羽ばたかせよう！',
+      start: '飛び立とう！',
+      overTitle: '💥 フライト終了！',
+      over: score => `今回のスコア：<b>${score}</b> 点。<br>自己ベスト：<b>${best}</b> 点<br>小鳥いわく：「次こそは！」`,
+      again: 'もう一度飛ぶ'
+    },
+    zh: {
+      gameTitle: '笨鸟先飞',
+      hint: '点击 / 空格 / ↑：扑腾一下　·　穿过管道得分',
+      welcomeTitle: '🐤 笨鸟先飞',
+      welcome: '一只不太聪明的小鸟，决定靠努力飞出一片天。<br>轻点屏幕，让它扑腾起来！',
+      start: '起飞！',
+      overTitle: '💥 飞行结束！',
+      over: score => `这次飞了 <b>${score}</b> 分。<br>历史最佳：<b>${best}</b> 分<br>小鸟表示：下次一定！`,
+      again: '再飞一次'
+    }
+  };
+  const t = words[lang];
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'ja';
+  document.querySelector('[data-i18n="gameTitle"]').textContent = t.gameTitle;
+  document.querySelector('[data-i18n="hint"]').textContent = t.hint;
+  document.getElementById('panelTitle').textContent = t.welcomeTitle;
+  document.getElementById('panelText').innerHTML = t.welcome;
+  document.getElementById('start').textContent = t.start;
+  const titleEl = document.getElementById('panelTitle'), textEl = document.getElementById('panelText');
+  const startBtn = document.getElementById('start');
+  let W=360,H=640, dpr=1, state='ready', bird, pipes, score, frame, best=0, groundOffset=0;
+  const rand=(a,b)=>a+Math.random()*(b-a);
+  function resize(){
+    const r=canvas.getBoundingClientRect(); dpr=Math.min(devicePixelRatio||1,2);
+    W=r.width; H=r.height; canvas.width=Math.round(W*dpr); canvas.height=Math.round(H*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    if(state==='ready') resetBird();
+  }
+  function resetBird(){bird={x:W*.29,y:H*.43,vy:0,rot:0};}
+  function reset(){score=0;frame=0;pipes=[];groundOffset=0;scoreEl.textContent='0';resetBird();}
+  function start(){reset();state='playing';panel.classList.add('hidden');flap();}
+  function flap(){if(state==='ready'){start();return;}if(state==='over')return;bird.vy=-H*.0095;}
+  function end(){
+    if(state!=='playing')return;state='over';best=Math.max(best,score);
+    titleEl.textContent=t.overTitle;
+    textEl.innerHTML=t.over(score);
+    startBtn.textContent=t.again;panel.classList.remove('hidden');
+  }
+  function rounded(x,y,w,h,r,fill,stroke){
+    ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=fill;ctx.fill();
+    if(stroke){ctx.lineWidth=3;ctx.strokeStyle=stroke;ctx.stroke();}
+  }
+  function cloud(x,y,s){
+    ctx.fillStyle='#ffffffaa';ctx.beginPath();
+    ctx.arc(x,y,13*s,0,Math.PI*2);ctx.arc(x+15*s,y-8*s,18*s,0,Math.PI*2);
+    ctx.arc(x+34*s,y,13*s,0,Math.PI*2);ctx.fill();
+  }
+  function drawBackground(){
+    const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#79cce9');sky.addColorStop(1,'#d8f4d2');
+    ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+    cloud(W*.18,H*.2,.8);cloud(W*.72,H*.32,1.05);cloud(W*.48,H*.09,.55);
+    ctx.fillStyle='#9bcf8b';ctx.beginPath();ctx.moveTo(0,H*.76);
+    ctx.quadraticCurveTo(W*.2,H*.62,W*.45,H*.76);ctx.quadraticCurveTo(W*.72,H*.62,W,H*.75);
+    ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.fill();
+  }
+  function drawPipe(p){
+    const w=p.w, cap=9;
+    ctx.fillStyle='#62b94d';ctx.strokeStyle='#347e3d';ctx.lineWidth=3;
+    ctx.fillRect(p.x,0,w,p.top);ctx.strokeRect(p.x,0,w,p.top);
+    ctx.fillRect(p.x,p.bottom,w,H-p.bottom-42);ctx.strokeRect(p.x,p.bottom,w,H-p.bottom-42);
+    ctx.fillStyle='#82d85b';
+    ctx.fillRect(p.x-cap,p.top-18,w+cap*2,18);ctx.strokeRect(p.x-cap,p.top-18,w+cap*2,18);
+    ctx.fillRect(p.x-cap,p.bottom,w+cap*2,18);ctx.strokeRect(p.x-cap,p.bottom,w+cap*2,18);
+    ctx.fillStyle='#ffffff30';ctx.fillRect(p.x+7,0,5,p.top-20);ctx.fillRect(p.x+7,p.bottom+20,5,H-p.bottom-65);
+  }
+  function drawBird(){
+    ctx.save();ctx.translate(bird.x,bird.y);ctx.rotate(bird.rot);
+    // tail
+    ctx.fillStyle='#ed8d32';ctx.beginPath();ctx.moveTo(-17,2);ctx.lineTo(-29,-5);ctx.lineTo(-27,8);ctx.closePath();ctx.fill();
+    // body
+    ctx.fillStyle='#ffd34f';ctx.strokeStyle='#a9682c';ctx.lineWidth=2.5;
+    ctx.beginPath();ctx.ellipse(0,0,19,15,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+    // wing
+    ctx.fillStyle='#f5a83e';ctx.beginPath();ctx.ellipse(-5,5,10,6,Math.sin(frame*.3)*.3,0,Math.PI*2);ctx.fill();
+    // eye
+    ctx.fillStyle='white';ctx.beginPath();ctx.arc(9,-6,6,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#263442';ctx.beginPath();ctx.arc(11,-6,2.6,0,Math.PI*2);ctx.fill();
+    // beak
+    ctx.fillStyle='#f07838';ctx.beginPath();ctx.moveTo(16,0);ctx.lineTo(28,4);ctx.lineTo(16,8);ctx.closePath();ctx.fill();ctx.stroke();
+    ctx.restore();
+  }
+  function drawGround(){
+    ctx.fillStyle='#e8c66e';ctx.fillRect(0,H-42,W,42);
+    ctx.fillStyle='#8bc85a';ctx.fillRect(0,H-46,W,8);
+    ctx.fillStyle='#c49b50';
+    for(let x=-(groundOffset%28);x<W;x+=28){ctx.fillRect(x,H-29,13,4);ctx.fillRect(x+12,H-13,8,4);}
+  }
+  function update(){
+    if(state!=='playing')return;frame++;
+    bird.vy+=H*.00048;bird.y+=bird.vy;bird.rot=Math.min(.9,Math.max(-.45,bird.vy*.08));
+    const gap=H*.235, pipeW=W*.17, speed=W*.0042;
+    if(frame%92===1){const top=rand(H*.17,H*.48);pipes.push({x:W+10,w:pipeW,top,bottom:top+gap,passed:false});}
+    pipes.forEach(p=>{
+      p.x-=speed;
+      if(!p.passed&&p.x+p.w<bird.x){p.passed=true;score++;scoreEl.textContent=score;}
+    });
+    pipes=pipes.filter(p=>p.x+p.w>-20);groundOffset+=speed;
+    const r=13;
+    if(bird.y+r>H-46||bird.y-r<0)end();
+    for(const p of pipes){
+      if(bird.x+r>p.x-5&&bird.x-r<p.x+p.w+5&&(bird.y-r<p.top||bird.y+r>p.bottom))end();
+    }
+  }
+  function render(){
+    drawBackground();pipes.forEach(drawPipe);drawGround();drawBird();
+    if(state==='ready'){bird.y=H*.43+Math.sin(Date.now()/250)*7;bird.rot=-.08;}
+  }
+  function loop(){update();render();requestAnimationFrame(loop);}
+  canvas.addEventListener('pointerdown',e=>{e.preventDefault();flap();});
+  document.addEventListener('keydown',e=>{if(['Space','ArrowUp','KeyW'].includes(e.code)){e.preventDefault();flap();}});
+  startBtn.addEventListener('click',start);
+  window.addEventListener('resize',resize);
+  resize();reset();loop();
+})();
+</script>
+</body>
+</html>
